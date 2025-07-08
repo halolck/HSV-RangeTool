@@ -1,6 +1,6 @@
 # HSV Range Tool
 
-**[➡️ ツールをすぐに試す (Live Demo)](https://halolck.github.io/HSV-RangeTool/)**
+**[➡️ ツールをすぐに試す](https://halolck.github.io/HSV-RangeTool/)**
 
 画像中から特定の色のHSV（色相・彩度・明度）の範囲を、対話的に見つけて調整するためのWebアプリケーションです。OpenCVなどの画像処理ライブラリで使う色範囲のしきい値を決める作業を、直感的かつ効率的に行えます。
 
