@@ -45,7 +45,7 @@
             padding: 10px;
             background-color: var(--background-main);
             align-items: flex-start;
-            position: relative; /* For overlay canvas */
+            position: relative;
         }
         canvas {
             display: block;
@@ -83,9 +83,52 @@
         input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; background: var(--accent-color); border-radius: 50%; border: 2px solid var(--background-panel); }
         input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; background: var(--accent-color); border-radius: 50%; border: 2px solid var(--background-panel); }
 
-        #range-listbox { width: 100%; background-color: #333; color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 5px; }
-        #range-listbox:focus { outline: 1px solid var(--accent-color); }
-        #range-listbox option { padding: 5px; }
+        #range-listbox {
+            width: 100%;
+            height: 130px;
+            background-color: #333;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+        #range-listbox:focus {
+             outline: 1px solid var(--accent-color);
+        }
+        .custom-option {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 10px;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .custom-option:hover {
+            background-color: #4f4f4f;
+        }
+        .custom-option.selected {
+            background-color: var(--accent-color);
+            color: var(--background-main);
+            font-weight: 500;
+        }
+        .custom-option .range-text {
+            font-family: monospace;
+            font-size: 0.9em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .custom-option .color-swatch {
+            width: 30px;
+            height: 16px;
+            /* border: 1px solid rgba(0,0,0,0.3); */ /* この行を削除またはコメントアウト */
+            border-radius: 2px;
+        }
+
         .preset-buttons { display: flex; gap: 10px; margin-top: 10px; }
         
         .ghost-btn {
@@ -206,7 +249,7 @@
             border-radius: 12px;
             border: 1px solid var(--border-color);
             box-shadow: 0 5px 25px rgba(0,0,0,0.5);
-            width: 400px; /* 横幅を少し広げました */
+            width: 400px;
         }
         .settings-panel h3 {
             text-align: center;
@@ -312,7 +355,7 @@
                 
                 <div class="control-group">
                     <h3>Saved Ranges</h3>
-                    <select id="range-listbox" multiple size="5"></select>
+                    <div id="range-listbox" tabindex="0"></div>
                     <div class="preset-buttons">
                         <button id="add-range-btn" class="ghost-btn">Add Current</button>
                         <button id="delete-range-btn" class="ghost-btn">Delete Selected</button>
@@ -442,6 +485,25 @@
     cursorPreviewCtx.imageSmoothingEnabled = false;
     const debounce = (func, delay) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => func.apply(this, a), delay); }; };
     const rgbToHsv = (r, g, b) => { r /= 255, g /= 255, b /= 255; let max = Math.max(r, g, b), min = Math.min(r, g, b); let h = 0, s, v = max, d = max - min; s = max === 0 ? 0 : d / max; if (max !== min) { switch (max) { case r: h = (g - b) / d + (g < b ? 6 : 0); break; case g: h = (b - r) / d + 2; break; case b: h = (r - g) / d + 4; break; } h /= 6; } return [Math.round(h * 179), Math.round(s * 255), Math.round(v * 255)]; };
+    
+    const hsvToRgb = (h, s, v) => {
+        h /= 179; s /= 255; v /= 255;
+        let r, g, b, i, f, p, q, t;
+        i = Math.floor(h * 6);
+        f = h * 6 - i;
+        p = v * (1 - s);
+        q = v * (1 - f * s);
+        t = v * (1 - (1 - f) * s);
+        switch (i % 6) {
+            case 0: r = v, g = t, b = p; break;
+            case 1: r = q, g = v, b = p; break;
+            case 2: r = p, g = v, b = t; break;
+            case 3: r = p, g = q, b = v; break;
+            case 4: r = t, g = p, b = v; break;
+            case 5: r = v, g = p, b = q; break;
+        }
+        return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    };
 
     const calculateBoundingBox = (ranges) => {
         if (!ranges || ranges.length === 0) {
@@ -568,13 +630,43 @@
     };
     
     const renderListbox = () => {
-        const selectedIndices = new Set(Array.from(rangeListbox.selectedOptions).map(opt => parseInt(opt.value)));
+        const selectedIndices = new Set(
+            Array.from(rangeListbox.querySelectorAll('.custom-option.selected'))
+                 .map(opt => parseInt(opt.dataset.index))
+        );
         rangeListbox.innerHTML = '';
         savedRanges.forEach((range, index) => {
-            const option = document.createElement('option');
-            option.value = index;
-            option.textContent = `Low[${range.low.join(',')}] Up[${range.up.join(',')}]`;
-            if (selectedIndices.has(index)) { option.selected = true; }
+            const option = document.createElement('div');
+            option.className = 'custom-option';
+            option.dataset.index = index;
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'range-text';
+            textSpan.textContent = `Low[${range.low.join(',')}] Up[${range.up.join(',')}]`;
+
+            const swatch = document.createElement('div');
+            swatch.className = 'color-swatch';
+            const [lr, lg, lb] = hsvToRgb(...range.low);
+            const [ur, ug, ub] = hsvToRgb(...range.up);
+            const lowRgbStr = `rgb(${lr},${lg},${lb})`;
+            const upRgbStr = `rgb(${ur},${ug},${ub})`;
+            swatch.style.background = `linear-gradient(135deg, ${lowRgbStr} 50%, ${upRgbStr} 50%)`;
+
+            option.appendChild(textSpan);
+            option.appendChild(swatch);
+
+            option.addEventListener('click', (e) => {
+                if (!e.ctrlKey && !e.metaKey) {
+                    rangeListbox.querySelectorAll('.custom-option.selected').forEach(opt => {
+                        if (opt !== option) opt.classList.remove('selected');
+                    });
+                }
+                option.classList.toggle('selected');
+            });
+            
+            if (selectedIndices.has(index)) {
+                option.classList.add('selected');
+            }
             rangeListbox.appendChild(option);
         });
     };
@@ -591,10 +683,9 @@
         return { h: unifiedRange, s: unifiedRange, v: unifiedRange };
     };
 
-
     imageLoader.addEventListener('change', (e) => {
         loadImages(e.target.files);
-        e.target.value = null; // これで同じファイルを連続して選択可能に
+        e.target.value = null;
     });
 
     const fileUploadLabel = document.getElementById('file-upload-label');
@@ -616,20 +707,15 @@
 
     document.getElementById('color-picker-btn').addEventListener('click', () => {
         if (imageList.length === 0) return;
-
         let cursorX, cursorY;
         let blockMouseMove = false;
         let blockMouseTimeout;
-
         const colorPreviewArea = document.getElementById('color-preview-area');
         previewPanel.style.cursor = 'none';
         cursorPreviewCanvas.style.display = 'block';
-
         const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
         const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim();
-        
         const debouncedLiveUpdate = debounce((ranges) => updateMask(ranges), 50);
-
         const getCanvasCoordsFromEvent = (e) => {
             if (e.target !== originalCanvas) return null;
             const rect = originalCanvas.getBoundingClientRect();
@@ -640,7 +726,6 @@
             if (x < 0 || x >= originalCanvas.width || y < 0 || y >= originalCanvas.height) return null;
             return { x, y };
         };
-
         const updateEyedropperPreview = (x, y) => {
             cursorOverlayCtx.clearRect(0, 0, cursorOverlayCanvas.width, cursorOverlayCanvas.height);
             cursorOverlayCtx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
@@ -651,12 +736,10 @@
             cursorOverlayCtx.moveTo(0, y + 0.5);
             cursorOverlayCtx.lineTo(cursorOverlayCanvas.width, y + 0.5);
             cursorOverlayCtx.stroke();
-
             const GRID_SIZE = 7, PIXEL_SCALE = 12, halfGrid = Math.floor(GRID_SIZE / 2);
             const startX = x - halfGrid, startY = y - halfGrid;
             cursorPreviewCtx.clearRect(0, 0, cursorPreviewCanvas.width, cursorPreviewCanvas.height);
             if (startX < 0 || startY < 0 || startX + GRID_SIZE > originalCanvas.width || startY + GRID_SIZE > originalCanvas.height) return;
-
             const imageData = originalCtx.getImageData(startX, startY, GRID_SIZE, GRID_SIZE);
             const data = imageData.data;
             for (let row = 0; row < GRID_SIZE; row++) {
@@ -669,12 +752,10 @@
             cursorPreviewCtx.strokeStyle = 'red';
             cursorPreviewCtx.lineWidth = 2;
             cursorPreviewCtx.strokeRect(halfGrid * PIXEL_SCALE, halfGrid * PIXEL_SCALE, PIXEL_SCALE, PIXEL_SCALE);
-
             const centerIndex = (halfGrid * GRID_SIZE + halfGrid) * 4;
             const [r, g, b] = [data[centerIndex], data[centerIndex + 1], data[centerIndex + 2]];
             if (r === undefined) return;
             const [h, s, v] = rgbToHsv(r, g, b);
-
             cursorPreviewCtx.textAlign = 'center';
             cursorPreviewCtx.font = 'bold 11px sans-serif';
             cursorPreviewCtx.fillStyle = accentColor;
@@ -686,7 +767,6 @@
             cursorPreviewCtx.fillText(h, 18, 110);
             cursorPreviewCtx.fillText(s, 42, 110);
             cursorPreviewCtx.fillText(v, 66, 110);
-
             if (document.getElementById('live-preview-toggle').checked) {
                 const { h: hRange, s: sRange, v: vRange } = getEyedropperRanges();
                 const liveRange = {
@@ -697,23 +777,19 @@
                 debouncedLiveUpdate([...currentRanges, liveRange]);
             }
         };
-
         const mouseMoveHandler = (e) => {
             if (blockMouseMove) return;
-
             const isRightHalf = e.clientX > window.innerWidth / 2;
             const isBottomHalf = e.clientY > window.innerHeight / 2;
             cursorPreviewCanvas.style.transform = `translate(${isRightHalf ? '-120%' : '20%'}, ${isBottomHalf ? '-120%' : '20%'})`;
             cursorPreviewCanvas.style.left = e.clientX + 'px';
             cursorPreviewCanvas.style.top = e.clientY + 'px';
-            
             const coords = getCanvasCoordsFromEvent(e);
             if (!coords) return;
             cursorX = coords.x;
             cursorY = coords.y;
             updateEyedropperPreview(cursorX, cursorY);
         };
-
         const finalizeSelection = (x, y) => {
             if (x === undefined) return;
             const [r, g, b] = originalCtx.getImageData(x, y, 1, 1).data;
@@ -726,7 +802,6 @@
             updateMask();
             cleanup();
         };
-
         const clickHandler = (e) => {
             if (e.target !== originalCanvas) {
                 cleanup();
@@ -734,7 +809,6 @@
             }
             finalizeSelection(cursorX, cursorY);
         };
-
         const keydownHandler = (e) => { 
             if (e.key === 'Escape') { 
                 cleanup();
@@ -748,18 +822,15 @@
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
                 e.preventDefault();
                 if (cursorX === undefined || cursorY === undefined) return;
-                
                 switch (e.key) {
                     case 'ArrowUp': cursorY = Math.max(0, cursorY - 1); break;
                     case 'ArrowDown': cursorY = Math.min(originalCanvas.height - 1, cursorY + 1); break;
                     case 'ArrowLeft': cursorX = Math.max(0, cursorX - 1); break;
                     case 'ArrowRight': cursorX = Math.min(originalCanvas.width - 1, cursorX + 1); break;
                 }
-
                 blockMouseMove = true;
                 clearTimeout(blockMouseTimeout);
                 blockMouseTimeout = setTimeout(() => { blockMouseMove = false; }, 200);
-
                 updateEyedropperPreview(cursorX, cursorY);
             }
         };
@@ -783,19 +854,12 @@
     copyBtn.addEventListener('click', () => {
         const rangesToCopy = [ { low: [...hsvValues.low], up: [...hsvValues.up] }, ...savedRanges ];
         const authoritativeRange = calculateBoundingBox(rangesToCopy);
-        
         const [lowH, lowS, lowV] = authoritativeRange.low;
         const [upH, upS, upV] = authoritativeRange.up;
-
         const format = copyFormatTemplate.value;
         const text = format
-            .replace(/{Low_H}/g, lowH)
-            .replace(/{Low_S}/g, lowS)
-            .replace(/{Low_V}/g, lowV)
-            .replace(/{Up_H}/g, upH)
-            .replace(/{Up_S}/g, upS)
-            .replace(/{Up_V}/g, upV);
-
+            .replace(/{Low_H}/g, lowH).replace(/{Low_S}/g, lowS).replace(/{Low_V}/g, lowV)
+            .replace(/{Up_H}/g, upH).replace(/{Up_S}/g, upS).replace(/{Up_V}/g, upV);
         navigator.clipboard.writeText(text).then(() => { 
             copyBtn.textContent = 'Copied!'; 
             setTimeout(() => { copyBtn.textContent = 'Copy Values'; }, 1500); 
@@ -824,9 +888,14 @@
     });
 
     addRangeBtn.addEventListener('click', () => { savedRanges.push({ low: [...hsvValues.low], up: [...hsvValues.up] }); renderListbox(); updateMask(); });
+    
     deleteRangeBtn.addEventListener('click', () => {
-        const selectedIndices = Array.from(rangeListbox.selectedOptions).map(opt => parseInt(opt.value));
-        for (let i = selectedIndices.length - 1; i >= 0; i--) { savedRanges.splice(selectedIndices[i], 1); }
+        const selectedIndices = Array.from(rangeListbox.querySelectorAll('.custom-option.selected'))
+                                       .map(opt => parseInt(opt.dataset.index))
+                                       .sort((a, b) => b - a);
+        for (const index of selectedIndices) {
+            savedRanges.splice(index, 1);
+        }
         renderListbox();
         updateMask();
     });
@@ -871,7 +940,6 @@
         });
     });
 
-    // Settings Modal Listeners
     settingsBtn.addEventListener('click', () => {
         settingsModal.style.display = 'flex';
     });
@@ -888,7 +956,6 @@
 
     const init = () => {
         copyFormatTemplate.value = 'low = [{Low_H}, {Low_S}, {Low_V}]\nup = [{Up_H}, {Up_S}, {Up_V}]';
-        
         updateUIFromState();
         window.addEventListener('resize', debounce(updateNavPosition, 50));
     };
