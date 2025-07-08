@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>HSV Range Tool</title>
+    <style>
+        :root {
+            --background-main: #1a1a1a;
+            --background-panel: #242424;
+            --border-color: #444;
+            --text-primary: #e0e0e0;
+            --text-secondary: #00aaff;
+            --accent-color: #00aaff;
+            --button-ghost-color: #999;
+            --scrollbar-thumb-color: #666;
+            --scrollbar-track-color: #2a2a2a;
+        }
+        body {
+            background-color: var(--background-main);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        .main-container { display: flex; height: 100vh; padding: 10px; box-sizing: border-box; }
+        .controls-panel { 
+            flex: 0 0 380px; 
+            background-color: var(--background-panel); 
+            border-radius: 12px; 
+            border: 1px solid var(--border-color); 
+            overflow-y: auto; 
+        }
+        .controls-content {
+            padding: 25px;
+        }
+        .resizer { flex: 0 0 10px; cursor: col-resize; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="30"><path d="M4 0 v30 M6 0 v30" fill="none" stroke="%23555" stroke-width="1"/></svg>'); background-repeat: no-repeat; background-position: center; }
+        
+        .preview-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow: auto;
+            padding: 10px;
+            background-color: var(--background-main);
+            align-items: flex-start;
+            position: relative; /* For overlay canvas */
+        }
+        canvas {
+            display: block;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+
+        #cursor-overlay-canvas {
+            position: absolute;
+            top: 10px; 
+            left: 10px;
+            pointer-events: none;
+            z-index: 10;
+            border: 1px solid transparent;
+        }
+        
+        h3 { margin-bottom: 10px; color: var(--text-secondary); font-weight: 500;}
+        .control-group { margin-bottom: 25px; }
+
+        .file-upload-label { min-height: 80px; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; border: 2px dashed var(--border-color); border-radius: 10px; padding: 10px; transition: background-color 0.2s, border-color 0.2s; }
+        .file-upload-label:hover { border-color: var(--accent-color); background-color: #333; }
+        #image-loader { display: none; }
+
+        #color-preview-area { width: 100%; height: 80px; border: 1px solid var(--border-color); background-color: #000; border-radius: 8px; display: flex; align-items: flex-start; justify-content: flex-end; padding: 8px; box-sizing: border-box; transition: background-color 0.3s; }
+        #color-picker-btn { width: 32px; height: 32px; padding: 6px; background-color: rgba(42, 42, 42, 0.8); border: 1px solid var(--border-color); border-radius: 5px; cursor: pointer; }
+        #color-picker-btn svg { fill: var(--text-primary); }
+
+        .slider-group { margin-bottom: 15px; position: relative; }
+        .slider-group .labels { display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 8px;}
+        .val-input { display: none; width: 100%; padding: 4px; box-sizing: border-box; background-color: #333; color: var(--text-primary); border: 1px solid var(--accent-color); border-radius: 3px; text-align: center; font-family: inherit; font-size: 1em; margin-top: 4px; }
+        .slider-group.edit-mode .value-container, .slider-group.edit-mode input[type="range"] { display: none; }
+        .slider-group.edit-mode .val-input { display: block; }
+
+        input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; background: transparent; border: 1px solid var(--border-color); border-radius: 3px; outline: none; cursor: pointer; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; background: var(--accent-color); border-radius: 50%; border: 2px solid var(--background-panel); }
+        input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; background: var(--accent-color); border-radius: 50%; border: 2px solid var(--background-panel); }
+
+        #range-listbox { width: 100%; background-color: #333; color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 5px; }
+        #range-listbox:focus { outline: 1px solid var(--accent-color); }
+        #range-listbox option { padding: 5px; }
+        .preset-buttons { display: flex; gap: 10px; margin-top: 10px; }
+        
+        .ghost-btn {
+            background-color: transparent;
+            color: var(--button-ghost-color);
+            border: 2px solid var(--button-ghost-color);
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .ghost-btn:hover {
+            background-color: var(--button-ghost-color);
+            color: var(--background-main);
+        }
+        .ghost-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #copy-btn {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+        }
+        .preset-buttons button {
+            flex: 1;
+            padding: 8px;
+            font-size: 14px;
+        }
+        
+        #zoom-controls { position: fixed; bottom: 20px; right: 20px; background-color: rgba(40, 40, 40, 0.9); padding: 8px 12px; border-radius: 22px; display: flex; align-items: center; gap: 10px; border: 1px solid #555; box-shadow: 0 2px 10px rgba(0,0,0,0.5); z-index: 100; }
+        #zoom-controls button { background-color: transparent; border: none; color: var(--text-primary); font-size: 20px; font-weight: bold; cursor: pointer; width: 24px; height: 24px; line-height: 24px; padding: 0; }
+        #zoom-controls input[type="range"] { width: 120px; margin: 0; height: 4px; }
+        #zoom-value { font-size: 14px; min-width: 45px; text-align: right; }
+        .controls-panel, .preview-panel { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb-color) var(--scrollbar-track-color); }
+        .controls-panel::-webkit-scrollbar, .preview-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+        .controls-panel::-webkit-scrollbar-track, .preview-panel::-webkit-scrollbar-track { background: var(--scrollbar-track-color); }
+        .controls-panel::-webkit-scrollbar-thumb, .preview-panel::-webkit-scrollbar-thumb { background-color: var(--scrollbar-thumb-color); border-radius: 4px; }
+        .controls-panel::-webkit-scrollbar-thumb:hover, .preview-panel::-webkit-scrollbar-thumb:hover { background-color: #888; }
+
+        #cursor-preview-canvas {
+            display: none; position: fixed; width: 84px; height: 120px;
+            border: 1px solid #999; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            pointer-events: none; z-index: 10001; 
+            transform: translate(-120%, -120%);
+            background-color: var(--background-main); image-rendering: pixelated;
+        }
+        
+        #image-nav-controls {
+            display: none; 
+            position: fixed;
+            bottom: 20px;
+            background-color: rgba(40, 40, 40, 0.9);
+            padding: 5px 8px;
+            border-radius: 22px;
+            align-items: center;
+            gap: 15px;
+            border: 1px solid #555;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            z-index: 100;
+            color: var(--text-primary);
+            transition: left 0.1s ease-out;
+        }
+        #image-nav-controls button {
+            padding: 0 10px;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        #image-counter {
+            font-size: 14px;
+            font-weight: 500;
+            user-select: none;
+        }
+
+        #settings-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(40, 40, 40, 0.9);
+            border: 1px solid #555;
+            border-radius: 50%;
+            color: var(--text-primary);
+            cursor: pointer;
+            z-index: 1001;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            transition: background-color 0.2s;
+        }
+        #settings-btn:hover {
+            background-color: #4f4f4f;
+        }
+        #settings-btn svg {
+            width: 22px;
+            height: 22px;
+            stroke: currentColor;
+        }
+
+        .settings-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(5px);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+        .settings-panel {
+            background-color: var(--background-panel);
+            padding: 20px 30px 25px 30px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 5px 25px rgba(0,0,0,0.5);
+            width: 400px; /* 横幅を少し広げました */
+        }
+        .settings-panel h3 {
+            text-align: center;
+            margin-top: 5px;
+            margin-bottom: 30px;
+        }
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            font-size: 0.95em;
+        }
+        .setting-row label {
+            color: var(--text-primary);
+        }
+        .setting-row input[type="number"] {
+            width: 70px;
+            padding: 6px;
+            background-color: #333;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            text-align: center;
+        }
+        .setting-row input[type="number"]:focus {
+            outline: 1px solid var(--accent-color);
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #555;
+            transition: .3s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: var(--accent-color);
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="controls-panel" id="controls-panel">
+            <div class="controls-content">
+                <div class="control-group">
+                    <label for="image-loader" class="file-upload-label" id="file-upload-label">
+                        <span class="text">画像を選択・ドラッグ＆ドロップ<br>または Ctrl+V で貼り付け</span>
+                    </label>
+                    <input type="file" id="image-loader" accept="image/*" multiple>
+                </div>
+
+                <div class="control-group">
+                    <div id="color-preview-area">
+                        <button id="color-picker-btn" title="スポイトで色を選択">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M341.6 29.2L240.1 130.8l-9.4-9.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3l-9.4-9.4L482.8 170.4c39-39 39-102.2 0-141.1s-102.2-39-141.1 0zM55.4 323.3c-15 15-23.4 35.4-23.4 56.6l0 42.4L5.4 462.2c-8.5 12.7-6.8 29.6 4 40.4s27.7 12.5 40.4 4L89.7 480l42.4 0c21.2 0 41.6-8.4 56.6-23.4L309.4 335.9l-45.3-45.3L143.4 411.3c-3 3-7.1 4.7-11.3 4.7L96 416l0-36.1c0-4.2 1.7-8.3 4.7-11.3L221.4 247.9l-45.3-45.3L55.4 323.3z" /></svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <h3>Low</h3>
+                    <div class="slider-group" data-param="low-h"><div class="labels"><span class="param-name">Hue</span><div class="value-container"><span class="val">0</span></div></div><input type="range" id="low-h" min="0" max="179" value="0"><input type="number" class="val-input" min="0" max="179"></div>
+                    <div class="slider-group" data-param="low-s"><div class="labels"><span class="param-name">Saturation</span><div class="value-container"><span class="val">0</span></div></div><input type="range" id="low-s" min="0" max="255" value="0"><input type="number" class="val-input" min="0" max="255"></div>
+                    <div class="slider-group" data-param="low-v"><div class="labels"><span class="param-name">Value</span><div class="value-container"><span class="val">0</span></div></div><input type="range" id="low-v" min="0" max="255" value="0"><input type="number" class="val-input" min="0" max="255"></div>
+                </div>
+    
+                <div class="control-group">
+                    <h3>Upper</h3>
+                    <div class="slider-group" data-param="up-h"><div class="labels"><span class="param-name">Hue</span><div class="value-container"><span class="val">179</span></div></div><input type="range" id="up-h" min="0" max="179" value="179"><input type="number" class="val-input" min="0" max="179"></div>
+                    <div class="slider-group" data-param="up-s"><div class="labels"><span class="param-name">Saturation</span><div class="value-container"><span class="val">255</span></div></div><input type="range" id="up-s" min="0" max="255" value="255"><input type="number" class="val-input" min="0" max="255"></div>
+                    <div class="slider-group" data-param="up-v"><div class="labels"><span class="param-name">Value</span><div class="value-container"><span class="val">255</span></div></div><input type="range" id="up-v" min="0" max="255" value="255"><input type="number" class="val-input" min="0" max="255"></div>
+                </div>
+                
+                <div class="control-group">
+                    <h3>Saved Ranges</h3>
+                    <select id="range-listbox" multiple size="5"></select>
+                    <div class="preset-buttons">
+                        <button id="add-range-btn" class="ghost-btn">Add Current</button>
+                        <button id="delete-range-btn" class="ghost-btn">Delete Selected</button>
+                    </div>
+                </div>
+    
+                <button id="copy-btn" class="ghost-btn">Copy Values</button>
+            </div>
+        </div>
+
+        <div class="resizer" id="resizer"></div>
+        
+        <div class="preview-panel" id="preview-panel">
+            <canvas id="original-canvas"></canvas>
+            <canvas id="mask-canvas"></canvas>
+            <canvas id="cursor-overlay-canvas"></canvas>
+        </div>
+    </div>
+    
+    <div id="image-nav-controls">
+        <button id="prev-image-btn" class="ghost-btn" title="前の画像">&lt;</button>
+        <span id="image-counter"></span>
+        <button id="next-image-btn" class="ghost-btn" title="次の画像">&gt;</button>
+    </div>
+
+    <div id="zoom-controls">
+        <button id="zoom-out" title="ズームアウト">-</button>
+        <input type="range" id="zoom-slider" min="10" max="400" value="100" step="5">
+        <button id="zoom-in" title="ズームイン">+</button>
+        <span id="zoom-value">100%</span>
+    </div>
+
+    <canvas id="cursor-preview-canvas" width="84" height="120"></canvas>
+
+    <button id="settings-btn" title="Settings">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+    </button>
+    <div class="settings-modal-overlay" id="settings-modal-overlay">
+        <div class="settings-panel">
+            <h3>Settings</h3>
+            
+            <div class="setting-row">
+                <label for="individual-controls-toggle">Individual Range Controls</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="individual-controls-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="setting-row" id="unified-range-row">
+                <label for="unified-range">Range (±)</label>
+                <input type="number" id="unified-range" value="10" min="0" max="128">
+            </div>
+
+            <div id="individual-range-rows" style="display: none;">
+                <div class="setting-row">
+                    <label for="hue-range">Hue Range (±)</label>
+                    <input type="number" id="hue-range" value="10" min="0" max="90">
+                </div>
+                <div class="setting-row">
+                    <label for="sat-range">Saturation Range (±)</label>
+                    <input type="number" id="sat-range" value="40" min="0" max="128">
+                </div>
+                <div class="setting-row">
+                    <label for="val-range">Value Range (±)</label>
+                    <input type="number" id="val-range" value="40" min="0" max="128">
+                </div>
+            </div>
+            
+            <hr style="border-color: #333; margin: 25px 0 20px 0;">
+            
+            <div class="setting-row">
+                <label for="live-preview-toggle">Live Filter Preview</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="live-preview-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <hr style="border-color: #333; margin: 25px 0 20px 0;">
+            
+            <div class="setting-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                <label for="copy-format-template" style="margin-bottom: 5px;">Copy Format Template</label>
+                <textarea id="copy-format-template" rows="4" style="width: 100%; box-sizing: border-box; background-color: #333; color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; font-family: monospace; resize: vertical;"></textarea>
+                <small style="color: #999;">Placeholders: {Low_H}, {Low_S}, {Low_V}, {Up_H}, {Up_S}, {Up_V}</small>
+            </div>
+            </div>
+    </div>
+    
+<script>
+    const imageLoader = document.getElementById('image-loader');
+    const originalCanvas = document.getElementById('original-canvas');
+    const maskCanvas = document.getElementById('mask-canvas');
+    const cursorOverlayCanvas = document.getElementById('cursor-overlay-canvas');
+    const originalCtx = originalCanvas.getContext('2d', { willReadFrequently: true });
+    const maskCtx = maskCanvas.getContext('2d');
+    const cursorOverlayCtx = cursorOverlayCanvas.getContext('2d');
+    const addRangeBtn = document.getElementById('add-range-btn');
+    const deleteRangeBtn = document.getElementById('delete-range-btn');
+    const rangeListbox = document.getElementById('range-listbox');
+    const copyBtn = document.getElementById('copy-btn');
+    const cursorPreviewCanvas = document.getElementById('cursor-preview-canvas');
+    const cursorPreviewCtx = cursorPreviewCanvas.getContext('2d');
+    const imageNavControls = document.getElementById('image-nav-controls');
+    const imageCounter = document.getElementById('image-counter');
+    const prevImageBtn = document.getElementById('prev-image-btn');
+    const nextImageBtn = document.getElementById('next-image-btn');
+    const previewPanel = document.getElementById('preview-panel');
+    const controlsPanel = document.getElementById('controls-panel');
+    const resizer = document.getElementById('resizer');
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsModal = document.getElementById('settings-modal-overlay');
+    const individualControlsToggle = document.getElementById('individual-controls-toggle');
+    const unifiedRangeRow = document.getElementById('unified-range-row');
+    const individualRangeRows = document.getElementById('individual-range-rows');
+    const copyFormatTemplate = document.getElementById('copy-format-template');
+    
+    let imageList = [];
+    let currentImageData = null;
+    let currentImageIndex = -1;
+    const hsvValues = { low: [0, 0, 0], up: [179, 255, 255] };
+    let savedRanges = [];
+
+    cursorPreviewCtx.imageSmoothingEnabled = false;
+    const debounce = (func, delay) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => func.apply(this, a), delay); }; };
+    const rgbToHsv = (r, g, b) => { r /= 255, g /= 255, b /= 255; let max = Math.max(r, g, b), min = Math.min(r, g, b); let h = 0, s, v = max, d = max - min; s = max === 0 ? 0 : d / max; if (max !== min) { switch (max) { case r: h = (g - b) / d + (g < b ? 6 : 0); break; case g: h = (b - r) / d + 2; break; case b: h = (r - g) / d + 4; break; } h /= 6; } return [Math.round(h * 179), Math.round(s * 255), Math.round(v * 255)]; };
+
+    const calculateBoundingBox = (ranges) => {
+        if (!ranges || ranges.length === 0) {
+            return { low: [0, 0, 0], up: [179, 255, 255] };
+        }
+        const finalRange = { low: [...ranges[0].low], up: [...ranges[0].up] };
+        for (let i = 1; i < ranges.length; i++) {
+            for (let j = 0; j < 3; j++) {
+                finalRange.low[j] = Math.min(finalRange.low[j], ranges[i].low[j]);
+                finalRange.up[j] = Math.max(finalRange.up[j], ranges[i].up[j]);
+            }
+        }
+        return finalRange;
+    };
+    
+    const updateMask = (overrideRanges = null) => {
+        if (!currentImageData) return;
+        const rangesToConsider = overrideRanges 
+            ? overrideRanges 
+            : [ { low: [...hsvValues.low], up: [...hsvValues.up] }, ...savedRanges ];
+
+        if (rangesToConsider.length === 0) {
+             maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+             return;
+        }
+
+        const finalRange = calculateBoundingBox(rangesToConsider);
+        const [h_low, s_low, v_low] = finalRange.low;
+        const [h_up, s_up, v_up] = finalRange.up;
+
+        const newImageData = maskCtx.createImageData(currentImageData.width, currentImageData.height);
+        const data = currentImageData.data, newData = newImageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+            const [h, s, v] = rgbToHsv(r, g, b);
+
+            if (h >= h_low && h <= h_up && s >= s_low && s <= s_up && v >= v_low && v <= v_up) {
+                newData.set([r, g, b, 255], i);
+            } else {
+                newData.set([0, 0, 0, 255], i);
+            }
+        }
+        maskCtx.putImageData(newImageData, 0, 0);
+    };
+    const debouncedUpdateMask = debounce(() => updateMask(), 150);
+
+    const updateUIFromState = () => {
+        document.querySelectorAll('.slider-group').forEach(group => {
+            const param = group.dataset.param;
+            const [bound, type] = param.split('-');
+            const index = {h:0, s:1, v:2}[type];
+            const value = hsvValues[bound][index];
+            group.querySelector('input[type="range"]').value = value;
+            group.querySelector('.val').textContent = value;
+        });
+    };
+    
+    const applyZoom = () => {
+        if (imageList.length === 0) return;
+        const scale = document.getElementById('zoom-slider').value / 100;
+        document.getElementById('zoom-value').textContent = `${document.getElementById('zoom-slider').value}%`;
+        const currentImage = imageList[currentImageIndex];
+        [originalCanvas, maskCanvas, cursorOverlayCanvas].forEach(c => { 
+            c.style.width = `${currentImage.width * scale}px`; 
+            c.style.height = `${currentImage.height * scale}px`; 
+        });
+    };
+
+    const updateNavPosition = () => {
+        if (imageList.length <= 1) return;
+        const previewRect = previewPanel.getBoundingClientRect();
+        imageNavControls.style.left = `${previewRect.left + 20}px`;
+    };
+
+    const updateImageNavUI = () => {
+        if (imageList.length <= 1) {
+            imageNavControls.style.display = 'none';
+            return;
+        }
+        imageNavControls.style.display = 'flex';
+        imageCounter.textContent = `${currentImageIndex + 1} / ${imageList.length}`;
+        prevImageBtn.disabled = currentImageIndex === 0;
+        nextImageBtn.disabled = currentImageIndex === imageList.length - 1;
+        updateNavPosition();
+    };
+    
+    const displayImage = (index) => {
+        if (index < 0 || index >= imageList.length) return;
+        currentImageIndex = index;
+        const currentImage = imageList[currentImageIndex];
+        [originalCanvas, maskCanvas, cursorOverlayCanvas].forEach(c => {
+            c.width = currentImage.width; c.height = currentImage.height;
+        });
+        originalCtx.drawImage(currentImage, 0, 0);
+        currentImageData = originalCtx.getImageData(0, 0, currentImage.width, currentImage.height);
+        applyZoom();
+        updateMask();
+        updateImageNavUI();
+    };
+
+    const loadImages = (files) => {
+        if (!files || files.length === 0) return;
+        const fileReaders = Array.from(files).map(file => {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = URL.createObjectURL(file);
+            });
+        });
+        Promise.all(fileReaders).then(newImages => {
+            const firstLoad = imageList.length === 0;
+            const insertIndex = currentImageIndex + 1;
+            imageList.splice(insertIndex, 0, ...newImages);
+            if (firstLoad) { 
+                displayImage(0); 
+            } else {
+                displayImage(insertIndex);
+            }
+        }).catch(err => {
+            console.error("Error loading images:", err);
+            document.getElementById('file-upload-label').querySelector('.text').textContent = "画像の読み込みに失敗";
+        });
+    };
+    
+    const renderListbox = () => {
+        const selectedIndices = new Set(Array.from(rangeListbox.selectedOptions).map(opt => parseInt(opt.value)));
+        rangeListbox.innerHTML = '';
+        savedRanges.forEach((range, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = `Low[${range.low.join(',')}] Up[${range.up.join(',')}]`;
+            if (selectedIndices.has(index)) { option.selected = true; }
+            rangeListbox.appendChild(option);
+        });
+    };
+
+    const getEyedropperRanges = () => {
+        if (individualControlsToggle.checked) {
+            return {
+                h: parseInt(document.getElementById('hue-range').value) || 0,
+                s: parseInt(document.getElementById('sat-range').value) || 0,
+                v: parseInt(document.getElementById('val-range').value) || 0,
+            };
+        }
+        const unifiedRange = parseInt(document.getElementById('unified-range').value) || 0;
+        return { h: unifiedRange, s: unifiedRange, v: unifiedRange };
+    };
+
+
+    imageLoader.addEventListener('change', (e) => {
+        loadImages(e.target.files);
+        e.target.value = null; // これで同じファイルを連続して選択可能に
+    });
+
+    const fileUploadLabel = document.getElementById('file-upload-label');
+    fileUploadLabel.addEventListener('dragover', (e) => e.preventDefault());
+    fileUploadLabel.addEventListener('drop', (e) => { e.preventDefault(); loadImages(e.dataTransfer.files); });
+
+    window.addEventListener('paste', e => {
+        const items = e.clipboardData.items;
+        const files = [];
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
+                files.push(items[i].getAsFile());
+            }
+        }
+        if (files.length > 0) {
+            loadImages(files);
+        }
+    });
+
+    document.getElementById('color-picker-btn').addEventListener('click', () => {
+        if (imageList.length === 0) return;
+
+        let cursorX, cursorY;
+        let blockMouseMove = false;
+        let blockMouseTimeout;
+
+        const colorPreviewArea = document.getElementById('color-preview-area');
+        previewPanel.style.cursor = 'none';
+        cursorPreviewCanvas.style.display = 'block';
+
+        const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
+        const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim();
+        
+        const debouncedLiveUpdate = debounce((ranges) => updateMask(ranges), 50);
+
+        const getCanvasCoordsFromEvent = (e) => {
+            if (e.target !== originalCanvas) return null;
+            const rect = originalCanvas.getBoundingClientRect();
+            const scaleX = originalCanvas.width / rect.width;
+            const scaleY = originalCanvas.height / rect.height;
+            const x = Math.floor((e.clientX - rect.left) * scaleX);
+            const y = Math.floor((e.clientY - rect.top) * scaleY);
+            if (x < 0 || x >= originalCanvas.width || y < 0 || y >= originalCanvas.height) return null;
+            return { x, y };
+        };
+
+        const updateEyedropperPreview = (x, y) => {
+            cursorOverlayCtx.clearRect(0, 0, cursorOverlayCanvas.width, cursorOverlayCanvas.height);
+            cursorOverlayCtx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            cursorOverlayCtx.lineWidth = 1;
+            cursorOverlayCtx.beginPath();
+            cursorOverlayCtx.moveTo(x + 0.5, 0);
+            cursorOverlayCtx.lineTo(x + 0.5, cursorOverlayCanvas.height);
+            cursorOverlayCtx.moveTo(0, y + 0.5);
+            cursorOverlayCtx.lineTo(cursorOverlayCanvas.width, y + 0.5);
+            cursorOverlayCtx.stroke();
+
+            const GRID_SIZE = 7, PIXEL_SCALE = 12, halfGrid = Math.floor(GRID_SIZE / 2);
+            const startX = x - halfGrid, startY = y - halfGrid;
+            cursorPreviewCtx.clearRect(0, 0, cursorPreviewCanvas.width, cursorPreviewCanvas.height);
+            if (startX < 0 || startY < 0 || startX + GRID_SIZE > originalCanvas.width || startY + GRID_SIZE > originalCanvas.height) return;
+
+            const imageData = originalCtx.getImageData(startX, startY, GRID_SIZE, GRID_SIZE);
+            const data = imageData.data;
+            for (let row = 0; row < GRID_SIZE; row++) {
+                for (let col = 0; col < GRID_SIZE; col++) {
+                    const i = (row * GRID_SIZE + col) * 4;
+                    cursorPreviewCtx.fillStyle = `rgba(${data[i]}, ${data[i+1]}, ${data[i+2]}, ${data[i+3]/255})`;
+                    cursorPreviewCtx.fillRect(col * PIXEL_SCALE, row * PIXEL_SCALE, PIXEL_SCALE, PIXEL_SCALE);
+                }
+            }
+            cursorPreviewCtx.strokeStyle = 'red';
+            cursorPreviewCtx.lineWidth = 2;
+            cursorPreviewCtx.strokeRect(halfGrid * PIXEL_SCALE, halfGrid * PIXEL_SCALE, PIXEL_SCALE, PIXEL_SCALE);
+
+            const centerIndex = (halfGrid * GRID_SIZE + halfGrid) * 4;
+            const [r, g, b] = [data[centerIndex], data[centerIndex + 1], data[centerIndex + 2]];
+            if (r === undefined) return;
+            const [h, s, v] = rgbToHsv(r, g, b);
+
+            cursorPreviewCtx.textAlign = 'center';
+            cursorPreviewCtx.font = 'bold 11px sans-serif';
+            cursorPreviewCtx.fillStyle = accentColor;
+            cursorPreviewCtx.fillText('H', 18, 98);
+            cursorPreviewCtx.fillText('S', 42, 98);
+            cursorPreviewCtx.fillText('V', 66, 98);
+            cursorPreviewCtx.font = '11px sans-serif';
+            cursorPreviewCtx.fillStyle = textColor;
+            cursorPreviewCtx.fillText(h, 18, 110);
+            cursorPreviewCtx.fillText(s, 42, 110);
+            cursorPreviewCtx.fillText(v, 66, 110);
+
+            if (document.getElementById('live-preview-toggle').checked) {
+                const { h: hRange, s: sRange, v: vRange } = getEyedropperRanges();
+                const liveRange = {
+                    low: [Math.max(0, h - hRange), Math.max(0, s - sRange), Math.max(0, v - vRange)],
+                    up: [Math.min(179, h + hRange), Math.min(255, s + sRange), Math.min(255, v + vRange)]
+                };
+                const currentRanges = [ { low: [...hsvValues.low], up: [...hsvValues.up] }, ...savedRanges ];
+                debouncedLiveUpdate([...currentRanges, liveRange]);
+            }
+        };
+
+        const mouseMoveHandler = (e) => {
+            if (blockMouseMove) return;
+
+            const isRightHalf = e.clientX > window.innerWidth / 2;
+            const isBottomHalf = e.clientY > window.innerHeight / 2;
+            cursorPreviewCanvas.style.transform = `translate(${isRightHalf ? '-120%' : '20%'}, ${isBottomHalf ? '-120%' : '20%'})`;
+            cursorPreviewCanvas.style.left = e.clientX + 'px';
+            cursorPreviewCanvas.style.top = e.clientY + 'px';
+            
+            const coords = getCanvasCoordsFromEvent(e);
+            if (!coords) return;
+            cursorX = coords.x;
+            cursorY = coords.y;
+            updateEyedropperPreview(cursorX, cursorY);
+        };
+
+        const finalizeSelection = (x, y) => {
+            if (x === undefined) return;
+            const [r, g, b] = originalCtx.getImageData(x, y, 1, 1).data;
+            colorPreviewArea.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+            const [h, s, v] = rgbToHsv(r, g, b);
+            const { h: hRange, s: sRange, v: vRange } = getEyedropperRanges();
+            hsvValues.low = [Math.max(0, h - hRange), Math.max(0, s - sRange), Math.max(0, v - vRange)];
+            hsvValues.up = [Math.min(179, h + hRange), Math.min(255, s + sRange), Math.min(255, v + vRange)];
+            updateUIFromState();
+            updateMask();
+            cleanup();
+        };
+
+        const clickHandler = (e) => {
+            if (e.target !== originalCanvas) {
+                cleanup();
+                return;
+            }
+            finalizeSelection(cursorX, cursorY);
+        };
+
+        const keydownHandler = (e) => { 
+            if (e.key === 'Escape') { 
+                cleanup();
+                return;
+            }
+            if (e.key === ' ') {
+                e.preventDefault();
+                finalizeSelection(cursorX, cursorY);
+                return;
+            }
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                e.preventDefault();
+                if (cursorX === undefined || cursorY === undefined) return;
+                
+                switch (e.key) {
+                    case 'ArrowUp': cursorY = Math.max(0, cursorY - 1); break;
+                    case 'ArrowDown': cursorY = Math.min(originalCanvas.height - 1, cursorY + 1); break;
+                    case 'ArrowLeft': cursorX = Math.max(0, cursorX - 1); break;
+                    case 'ArrowRight': cursorX = Math.min(originalCanvas.width - 1, cursorX + 1); break;
+                }
+
+                blockMouseMove = true;
+                clearTimeout(blockMouseTimeout);
+                blockMouseTimeout = setTimeout(() => { blockMouseMove = false; }, 200);
+
+                updateEyedropperPreview(cursorX, cursorY);
+            }
+        };
+        const cleanup = () => {
+            previewPanel.style.cursor = 'default';
+            cursorPreviewCanvas.style.display = 'none';
+            cursorOverlayCtx.clearRect(0, 0, cursorOverlayCanvas.width, cursorOverlayCanvas.height);
+            previewPanel.removeEventListener('mousemove', mouseMoveHandler);
+            document.removeEventListener('click', clickHandler);
+            window.removeEventListener('keydown', keydownHandler);
+            clearTimeout(blockMouseTimeout);
+            updateMask();
+        };
+        setTimeout(() => {
+            previewPanel.addEventListener('mousemove', mouseMoveHandler);
+            document.addEventListener('click', clickHandler, { once: true });
+            window.addEventListener('keydown', keydownHandler);
+        }, 0);
+    });
+
+    copyBtn.addEventListener('click', () => {
+        const rangesToCopy = [ { low: [...hsvValues.low], up: [...hsvValues.up] }, ...savedRanges ];
+        const authoritativeRange = calculateBoundingBox(rangesToCopy);
+        
+        const [lowH, lowS, lowV] = authoritativeRange.low;
+        const [upH, upS, upV] = authoritativeRange.up;
+
+        const format = copyFormatTemplate.value;
+        const text = format
+            .replace(/{Low_H}/g, lowH)
+            .replace(/{Low_S}/g, lowS)
+            .replace(/{Low_V}/g, lowV)
+            .replace(/{Up_H}/g, upH)
+            .replace(/{Up_S}/g, upS)
+            .replace(/{Up_V}/g, upV);
+
+        navigator.clipboard.writeText(text).then(() => { 
+            copyBtn.textContent = 'Copied!'; 
+            setTimeout(() => { copyBtn.textContent = 'Copy Values'; }, 1500); 
+        });
+    });
+
+    prevImageBtn.addEventListener('click', () => displayImage(currentImageIndex - 1));
+    nextImageBtn.addEventListener('click', () => displayImage(currentImageIndex + 1));
+    document.getElementById('zoom-in').addEventListener('click', () => { document.getElementById('zoom-slider').value = Math.min(parseInt(document.getElementById('zoom-slider').value) + 10, 400); applyZoom(); });
+    document.getElementById('zoom-out').addEventListener('click', () => { document.getElementById('zoom-slider').value = Math.max(parseInt(document.getElementById('zoom-slider').value) - 10, 10); applyZoom(); });
+    document.getElementById('zoom-slider').addEventListener('input', applyZoom);
+    
+    resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const startDrag = (e_move) => {
+            const newWidth = e_move.clientX - controlsPanel.getBoundingClientRect().left;
+            if (newWidth > 250) controlsPanel.style.flexBasis = `${newWidth}px`;
+            updateNavPosition();
+        };
+        const stopDrag = () => {
+            document.removeEventListener('mousemove', startDrag);
+            document.removeEventListener('mouseup', stopDrag);
+        };
+        document.addEventListener('mousemove', startDrag);
+        document.addEventListener('mouseup', stopDrag);
+    });
+
+    addRangeBtn.addEventListener('click', () => { savedRanges.push({ low: [...hsvValues.low], up: [...hsvValues.up] }); renderListbox(); updateMask(); });
+    deleteRangeBtn.addEventListener('click', () => {
+        const selectedIndices = Array.from(rangeListbox.selectedOptions).map(opt => parseInt(opt.value));
+        for (let i = selectedIndices.length - 1; i >= 0; i--) { savedRanges.splice(selectedIndices[i], 1); }
+        renderListbox();
+        updateMask();
+    });
+
+    document.querySelectorAll('.slider-group').forEach(group => {
+        const rangeSlider = group.querySelector('input[type="range"]');
+        const numInput = group.querySelector('.val-input');
+        const activateEditMode = () => {
+            group.classList.add('edit-mode');
+            numInput.value = rangeSlider.value;
+            numInput.focus();
+            numInput.select();
+            const commitChange = () => {
+                let value = parseInt(numInput.value);
+                const min = parseInt(rangeSlider.min); const max = parseInt(rangeSlider.max);
+                if (isNaN(value)) { value = rangeSlider.value; }
+                value = Math.max(min, Math.min(max, value));
+                rangeSlider.value = value;
+                const param = group.dataset.param;
+                const [bound, type] = param.split('-');
+                const index = {h:0, s:1, v:2}[type];
+                hsvValues[bound][index] = value;
+                updateUIFromState(); updateMask();
+                group.classList.remove('edit-mode');
+            };
+            const keydownHandler = (e_key) => {
+                if (e_key.key === 'Enter') numInput.blur();
+                if (e_key.key === 'Escape') { group.classList.remove('edit-mode'); numInput.removeEventListener('blur', commitChange); }
+            };
+            numInput.addEventListener('blur', commitChange, { once: true });
+            numInput.addEventListener('keydown', keydownHandler);
+            numInput.addEventListener('blur', () => { numInput.removeEventListener('keydown', keydownHandler); }, { once: true });
+        };
+        rangeSlider.addEventListener('dblclick', activateEditMode);
+        rangeSlider.addEventListener('input', () => {
+            const param = group.dataset.param;
+            const [bound, type] = param.split('-');
+            const index = {h:0, s:1, v:2}[type];
+            hsvValues[bound][index] = parseInt(rangeSlider.value);
+            updateUIFromState();
+            debouncedUpdateMask();
+        });
+    });
+
+    // Settings Modal Listeners
+    settingsBtn.addEventListener('click', () => {
+        settingsModal.style.display = 'flex';
+    });
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) {
+            settingsModal.style.display = 'none';
+        }
+    });
+    individualControlsToggle.addEventListener('change', (e) => {
+        const showIndividual = e.target.checked;
+        individualRangeRows.style.display = showIndividual ? 'block' : 'none';
+        unifiedRangeRow.style.display = showIndividual ? 'none' : 'flex';
+    });
+
+    const init = () => {
+        copyFormatTemplate.value = 'low = [{Low_H}, {Low_S}, {Low_V}]\nup = [{Up_H}, {Up_S}, {Up_V}]';
+        
+        updateUIFromState();
+        window.addEventListener('resize', debounce(updateNavPosition, 50));
+    };
+    
+    init();
+
+</script>
+</body>
+</html>
